@@ -1,1 +1,45 @@
-
+name: Build APK
+on:
+  push:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unpack zip if project was uploaded as a zip
+        run: |
+          if [ -f eyebot_controller.zip ]; then unzip -oq eyebot_controller.zip; fi
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Create Android project and add Bluetooth permissions
+        run: |
+          cp -r lib /tmp/lib_bak && cp pubspec.yaml /tmp/pubspec_bak.yaml
+          flutter create --platforms=android --project-name eyebot_controller .
+          rm -rf lib && cp -r /tmp/lib_bak lib && cp /tmp/pubspec_bak.yaml pubspec.yaml
+          python3 - <<'PY'
+          p = 'android/app/src/main/AndroidManifest.xml'
+          s = open(p).read()
+          perms = '''<uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+              <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+              <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
+              <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+              <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
+              <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
+              '''
+          open(p, 'w').write(s.replace('<application', perms + '<application', 1))
+          PY
+      - run: flutter pub get
+      - run: flutter build apk --release
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: EyeBot Controller build ${{ github.run_number }}
+          files: build/app/outputs/flutter-apk/app-release.apk
